@@ -1,0 +1,13 @@
+{
+  "name": "teacher-voice",
+  "version": "0.1.0",
+  "description": "PDF/TeX → AI lecture → MiniMax TTS MP3, on Cloudflare Pages.",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev . --port 8788",
+    "deploy": "wrangler pages deploy . --project-name teacher-voice"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
