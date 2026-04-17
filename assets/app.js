@@ -74,6 +74,9 @@ async function extractPdfText(file) {
 }
 
 // --- Generate explanation ---
+// Maximum characters per LLM call to stay within typical context/response windows.
+const LLM_INPUT_CHARS = 6000;
+
 $("btn-explain").addEventListener("click", async () => {
   const text = ($("extracted-text").value || state.rawText || "").trim();
   if (!text) { setStatus("请先上传或粘贴文本", "error"); return; }
@@ -87,29 +90,41 @@ $("btn-explain").addEventListener("click", async () => {
   const freedom = parseInt($("freedom").value, 10);
   const lang = $("lang").value;
   const sysPrompt = buildSystemPrompt(freedom, lang, s.llm.sysprompt);
+  const inputChunks = chunkText(text, LLM_INPUT_CHARS);
 
   $("btn-explain").disabled = true;
   $("btn-tts").disabled = true;
-  showProgress(true, 10);
-  setStatus("正在生成讲解稿 ...");
+  $("lecture-text").value = "";
+  showProgress(true, 0);
+  setStatus(`正在生成讲解稿 0/${inputChunks.length} ...`);
 
+  const outputs = [];
   try {
-    const r = await fetch("/api/llm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        base: s.llm.base, key: s.llm.key, model: s.llm.model,
-        messages: [
-          { role: "system", content: sysPrompt },
-          { role: "user", content: buildUserPrompt(text, freedom, lang) },
-        ],
-        max_tokens: 4096,
-        temperature: 0.2 + (freedom / 100) * 0.8,
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    state.lectureText = (data.text || "").trim();
+    for (let i = 0; i < inputChunks.length; i++) {
+      const partNote = inputChunks.length > 1
+        ? `（这是第 ${i + 1} / ${inputChunks.length} 段。请继续之前的讲解风格，不要重复引言和结束语。）\n\n`
+        : "";
+      const r = await fetch("/api/llm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          base: s.llm.base, key: s.llm.key, model: s.llm.model,
+          messages: [
+            { role: "system", content: sysPrompt },
+            { role: "user", content: partNote + buildUserPrompt(inputChunks[i], freedom, lang) },
+          ],
+          max_tokens: 4096,
+          temperature: 0.2 + (freedom / 100) * 0.8,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      outputs.push((data.text || "").trim());
+      $("lecture-text").value = outputs.join("\n\n");
+      showProgress(true, Math.round(((i + 1) / inputChunks.length) * 100));
+      setStatus(`讲解稿生成中 ${i + 1}/${inputChunks.length}`);
+    }
+    state.lectureText = outputs.join("\n\n").trim();
     $("lecture-text").value = state.lectureText;
     showProgress(false);
     setStatus(`讲解稿生成完成 · ${state.lectureText.length} 字`, "ok");
